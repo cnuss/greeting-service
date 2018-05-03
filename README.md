@@ -23,3 +23,11 @@ Sample RESTful Service
 # Connecting
  1. http://localhost:11223/greeting
  1. http://localhost:11223/greeting?name=Christian
+
+# Kubernetes
+
+## Running on Kubernetes on AWS
+This will provision an ELB
+1. `kubectl apply -f k8s/deployment.yml`
+2. Get the ELB name from the `EXTERNAL-IP` column of `kubectl get services -o wide`
+3. http://abcdef-1234.us-west-2.elb.amazonaws.com/greeting
