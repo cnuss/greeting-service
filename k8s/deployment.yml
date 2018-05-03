@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: greeting-service-deployment
+  labels:
+    app: greeting-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: greeting-service
+  template:
+    metadata:
+      labels:
+        app: greeting-service
+    spec:
+      containers:
+      - name: greeting-service
+        image: cnuss/greeting-service:latest
+        ports:
+        - containerPort: 11223
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: greeting-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: greeting-service
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 11223
