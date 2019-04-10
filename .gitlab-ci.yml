@@ -1,21 +1,78 @@
+# Set in config:
+# AWS_ACCESS_KEY_ID
+# AWS_SECRET_ACCESS_KEY
+# AWS_ACCOUNT_ID
+# AWS_REGION
+# ECS_REPOSITORY_NAME
+# ECS_TASK_DEFINITION_NAME
+# ECS_CLUSTER_NAME
+# ECS_SERVICE_NAME
+
+variables:
+  REPOSITORY_URL: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECS_REPOSITORY_NAME
+  REGION: $AWS_REGION
+  TASK_DEFINTION_NAME: $ECS_TASK_DEFNINTION_NAME
+  CLUSTER_NAME: $ECS_CLUSTER_NAME
+  SERVICE_NAME: $ECS_SERVICE_NAME
+
+before_script:
+  - apk add --no-cache curl jq python py-pip jq
+  - pip install awscli
+  - $(aws ecr get-login --no-include-email --region "${REGION}")
+  - IMAGE_TAG="$(echo $CI_COMMIT_SHA | head -c 8)"
+  - export GRADLE_USER_HOME=`pwd`/.gradle
+
+cache:
+  paths:
+    - .gradle/wrapper
+    - .gradle/caches
+
 stages:
+  - check
   - install
+  - push
   - deploy
 
-install:
-  stage: install
-  image: gradle:jdk8
+test:
+  stage: check
+  image: java:8-jdk
+  script:
+    - ./gradlew check
+
+build:
+  stage: build
+  image: java:8-jdk
   script:
     - ./gradlew installDist
+  artifacts:
+    paths:
+      - build/install
+  only:
+    - master
+
+push:
+  stage: push
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t $REPOSITORY_URL:latest .
+    - docker tag $REPOSITORY_URL:latest $REPOSITORY_URL:$IMAGE_TAG
+    - docker push $REPOSITORY_URL:latest
+    - docker push $REPOSITORY_URL:$IMAGE_TAG
+  only:
+    - master
 
 deploy:
   stage: deploy
-  image:
-    name: docker:stable
-    entrypoint:
-      - '/usr/bin/env'
-      - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+  image: docker:latest
+  services:
+    - docker:dind
   script:
-    - rm -rf .ecs
-    - wget -O /usr/local/bin/ecs-cli https://s3.amazonaws.com/amazon-ecs-cli/ecs-cli-linux-amd64-latest
-    - chmod +x /usr/local/bin/ecs-cli
+    - echo $REPOSITORY_URL:$IMAGE_TAG
+    - TASK_DEFINITION=$(aws ecs describe-task-definition --task-definition "$TASK_DEFINTION_NAME" --region "${REGION}")
+    - NEW_CONTAINER_DEFINTIION=$(aws ecs describe-task-definition --task-definition "$TASK_DEFINITION_NAME" --region "${REGION}" | jq '.taskDefinition.containerDefinitions[] | select(.image | contains("$REPOSITORY_URL")) | .image = "$REPOSITORY_URL:$IMAGE_TAG"')
+    - aws ecs register-task-definition --region "${REGION}" --family "${TASK_DEFINTION_NAME}" --container-definitions "${NEW_CONTAINER_DEFINTIION}"
+    - aws ecs update-service --region "${REGION}" --cluster "${CLUSTER_NAME}" --service "${SERVICE_NAME}"  --task-definition "${TASK_DEFINTION_NAME}"
+  only:
+    - master
